@@ -1,0 +1,29 @@
+
+- Sample Ressources Requirements:
+
+- 13 000 étudiants
+- 7 départements
+- 200 offres
+- 6-9 modules par formation
+- Exam Venues Capacite:
+    - Salle TD: 20 seats (1 proctor)
+    - Amphi: 60 seats (3 proctors)
+- 3 week period (18 days without fridays)
+- 4 sessions a day
+- Amphitheaters require multiple proctors
+- Each group can only share the venue with at most another group
+
+- Flexible Ressources:
+
+- Number of exam venues (current: 55 Amphis, 110 Salles TD = 165 total)
+- Number of teachers per department (current: ~77 per department, 540 total)
+
+- Optimization Constraints
+
+Étudiants : Maximum 1 examen par jour
+Professeurs : Maximum 3 examens par jour
+Salles et amphis: Respect capacité réelle
+Priorités: Examens du département sont priorisés (un enseignant surveil les examens de son département en priorité)
+Tous les enseignants doivent avoir le même nombre de surveillances
+
+Optimization time constrainte: under 45 seconds

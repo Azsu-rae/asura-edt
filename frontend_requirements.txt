@@ -1,0 +1,23 @@
+
+Plateforme d'Optimisation des Emplois du Temps d'Examens Universitaires
+
+- Génération automatique EDT par formation! Chaque formation doit avoire sont propre EDT (format PDF) qui incluent tous ses groupes
+- KPIs académiques (heures profs, taux salles utilisées, … etc.)
+- benchmarks performances (temps d’exécution des requêtes)
+- occupation globale des amphis et salles
+- planning pour chaque professeurs
+- taux conflits par département
+- validation finale EDT
+- optimisation des ressources
+- détection conflits
+- Validation par département
+- statistiques
+- conflits par formation
+- Consultation
+- filtrage
+
+Technologies
+
+SGBD: MariaDB
+Backend: Python
+Frontend: Streamlit
