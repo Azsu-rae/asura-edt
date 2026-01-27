@@ -6,5 +6,5 @@ set +a
 
 source sql/setup_db.sh
 
-python -m scripts.populate_db
-python -m scripts.optimize
+# python -m scripts.populate_db
+# python -m scripts.optimize

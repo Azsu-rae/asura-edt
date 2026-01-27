@@ -44,7 +44,9 @@ try:
         room_type = st.selectbox("Type de Salle", ["Tous", "Amphi", "Salle_TD"])
 
     with col2:
-        cur.execute("SELECT DISTINCT DATE(date_heure) FROM examens ORDER BY date_heure")
+        cur.execute(
+            "SELECT date_heure, DISTINCT DATE(date_heure) FROM examens ORDER BY date_heure"
+        )
         dates = [row[0] for row in cur.fetchall()]
         date_options = ["Toutes les dates"] + [d.strftime("%d/%m/%Y") for d in dates]
         selected_date = st.selectbox("Date", date_options)
@@ -82,7 +84,8 @@ try:
             ORDER BY l.type DESC, utilisations DESC, l.nom
         """)
     elif room_type != "Tous" and selected_date == "Toutes les dates":
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
                 l.nom as salle,
                 l.type,
@@ -93,11 +96,14 @@ try:
             WHERE l.type = %s
             GROUP BY l.id, l.nom, l.type, l.capacite
             ORDER BY utilisations DESC, l.nom
-        """, (room_type,))
+        """,
+            (room_type,),
+        )
     elif room_type == "Tous" and selected_date != "Toutes les dates":
         day, month, year = selected_date.split("/")
         date_str = f"{year}-{month}-{day}"
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
                 l.nom as salle,
                 l.type,
@@ -107,11 +113,14 @@ try:
             LEFT JOIN examens ex ON ex.lieu_examen_id = l.id AND DATE(ex.date_heure) = %s
             GROUP BY l.id, l.nom, l.type, l.capacite
             ORDER BY l.type DESC, utilisations DESC, l.nom
-        """, (date_str,))
+        """,
+            (date_str,),
+        )
     else:
         day, month, year = selected_date.split("/")
         date_str = f"{year}-{month}-{day}"
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
                 l.nom as salle,
                 l.type,
@@ -122,13 +131,16 @@ try:
             WHERE l.type = %s
             GROUP BY l.id, l.nom, l.type, l.capacite
             ORDER BY utilisations DESC, l.nom
-        """, (date_str, room_type))
+        """,
+            (date_str, room_type),
+        )
 
     results = cur.fetchall()
     df = pd.DataFrame(results, columns=["Salle", "Type", "Capacite", "Utilisations"])
 
     # Calculate occupancy rate
-    cur.execute("SELECT COUNT(DISTINCT DATE(date_heure)) * 4 FROM examens")  # 4 slots per day
+    # 4 slots per day
+    cur.execute("SELECT COUNT(DISTINCT DATE(date_heure)) * 4 FROM examens")
     total_slots = cur.fetchone()[0] or 1
 
     df["Taux"] = (df["Utilisations"] / total_slots * 100).round(1)
@@ -153,7 +165,9 @@ try:
     """)
 
     results = cur.fetchall()
-    df_slots = pd.DataFrame(results, columns=["Date", "Heure", "Examens", "Capacite Utilisee"])
+    df_slots = pd.DataFrame(
+        results, columns=["Date", "Heure", "Examens", "Capacite Utilisee"]
+    )
 
     col1, col2 = st.columns(2)
 
@@ -173,17 +187,22 @@ try:
     # === Room Details ===
     st.subheader("Detail par Salle")
 
-    cur.execute("SELECT id, nom, type, capacite FROM lieu_examens ORDER BY type DESC, nom")
+    cur.execute(
+        "SELECT id, nom, type, capacite FROM lieu_examens ORDER BY type DESC, nom"
+    )
     rooms = cur.fetchall()
 
-    selected_room = st.selectbox("Selectionner une salle",
-                                  ["-- Selectionnez --"] + [f"{r[1]} ({r[2]}, {r[3]} places)" for r in rooms])
+    selected_room = st.selectbox(
+        "Selectionner une salle",
+        ["-- Selectionnez --"] + [f"{r[1]} ({r[2]}, {r[3]} places)" for r in rooms],
+    )
 
     if selected_room != "-- Selectionnez --":
         room_name = selected_room.split(" (")[0]
         room_id = next(r[0] for r in rooms if r[1] == room_name)
 
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
                 DATE_FORMAT(ex.date_heure, '%d/%m/%Y') as date,
                 DATE_FORMAT(ex.date_heure, '%H:%i') as heure,
@@ -193,11 +212,15 @@ try:
             JOIN modules m ON ex.module_id = m.id
             WHERE ex.lieu_examen_id = %s
             ORDER BY ex.date_heure
-        """, (room_id,))
+        """,
+            (room_id,),
+        )
 
         exams = cur.fetchall()
         if exams:
-            df_room = pd.DataFrame(exams, columns=["Date", "Heure", "Module", "Inscrits"])
+            df_room = pd.DataFrame(
+                exams, columns=["Date", "Heure", "Module", "Inscrits"]
+            )
             st.dataframe(df_room, use_container_width=True)
         else:
             st.info("Aucun examen planifie dans cette salle.")
@@ -207,4 +230,5 @@ try:
 except Exception as e:
     st.error(f"Erreur: {e}")
     import traceback
+
     st.code(traceback.format_exc())

@@ -15,7 +15,7 @@ A faculty with 13,000+ students across 7 departments needs to schedule exams for
 | Students | 13,000 |
 | Departments | 7 |
 | Formations | ~200 |
-| Modules per formation | 6-9 |
+| Modules per formation | 6 |
 | Salle TD capacity | 20 seats |
 | Amphi capacity | 60 seats |
 | Exam period | 3 weeks (18 days, no Fridays) |
@@ -46,12 +46,13 @@ A faculty with 13,000+ students across 7 departments needs to schedule exams for
 | `specialites` | Programs within departments (Licence/Master cycles) |
 | `formations` | Specific semester instances (e.g., "Informatique Licence S3") |
 | `modules` | 6 modules per formation, 1,116 total |
-| `etudiants` | 12,901 students |
-| `inscriptions` | Student-module enrollments (131,902 records) |
+| `etudiants` | ~13,000 students with `formation_id` and `groupe` assignments |
 | `professeurs` | 540 professors linked to departments |
-| `lieu_examens` | 130 exam rooms |
-| `examens` | Scheduled exams (module + room + datetime) |
+| `lieu_examens` | 130 exam rooms (Amphitheatres + Salles TD) |
+| `examens` | Scheduled exams with `formation_id` and `groupes` for room assignment |
 | `surveillances` | Proctor assignments (exam + professor) |
+
+**Note:** There is no `inscriptions` table. Students are implicitly enrolled in all modules of their formation.
 
 ## The Core Challenge: Graph Coloring
 
@@ -62,34 +63,32 @@ The student constraint creates a **graph coloring problem**:
 - Modules with conflicts cannot be scheduled on the same day
 - The **chromatic number** = minimum days needed for zero violations
 
-### The Enrollment Challenge
+### Simplified Enrollment Model
 
-To achieve 130,000 enrollments with 13,000 students requires ~10 modules per student on average. This is achieved through:
+After re-thinking the enrollment system, we adopted a **formation-based implicit enrollment** model:
 
-- **6 current formation modules** (mandatory)
-- **4+ retake modules** from previous semesters
+- Students are automatically enrolled in **all 6 modules of their current formation**
+- **No retakes** - students only take current semester modules
+- Enrollment is derived from `etudiants.formation_id` → `modules.formation_id`
 
-However, retake patterns directly affect the chromatic number:
+This simplification has major benefits:
 
-| Enrollment Model | Enrollments | Chromatic Number | Feasible in 18 days? |
-|------------------|-------------|------------------|---------------------|
-| Formation only (6 modules) | 77,406 | 6 | Yes |
-| +1 previous semester | 91,640 | 12 | Yes |
-| +2 previous semesters | 131,902 | 18 | Yes (exact fit) |
-| +All previous semesters | 131,992 | 36 | No (violations) |
-| +Cross-department | 129,391 | 113 | No (severe violations) |
+| Aspect | Old System (inscriptions) | New System (formation-based) |
+|--------|---------------------------|------------------------------|
+| Enrollment tracking | Explicit `inscriptions` table | Implicit via `formation_id` |
+| Modules per student | 10+ (with retakes) | 6 (current formation only) |
+| Chromatic number | Up to 18 | 6 (formation modules share students) |
+| Data complexity | 131,902 enrollment records | No extra table needed |
+| Conflict density | High (cross-semester conflicts) | Low (only within-formation conflicts) |
 
-### Solution: Controlled Retake Pattern
+### Why This Works
 
-The key insight: **limiting retakes to 2 previous semesters of the same specialty** achieves 130k+ enrollments while keeping chromatic number at exactly 18 (matching available days).
+Students within the same formation share all 6 modules, creating a **clique** (complete subgraph) of size 6. However, students in different formations have **zero conflicts** since they share no modules.
 
-```python
-# Retakes from up to 2 PREVIOUS semesters of the SAME specialty
-previous_formations = [
-    f_id for f_id, sem in formations_by_specialty.get(specialite_id, [])
-    if current_semester - 2 <= sem < current_semester
-]
-```
+This means:
+- **Chromatic number = 6** (only 6 modules per student need different days)
+- **18 exam days** provides 3x headroom for load balancing
+- Conflict graph is highly structured (disjoint cliques)
 
 ## Algorithm
 
@@ -116,17 +115,32 @@ Uses a **greedy coloring** algorithm with the **largest-degree-first** heuristic
    - Choose the day+slot with lowest load (for balance)
    - If no conflict-free day exists, choose day with minimum conflicts
 
-### Phase 3: Room Assignment
+### Phase 3: Room Assignment (Group-Based)
+
+Room assignment now considers **student groups within formations** for better organization:
 
 For each time slot:
-1. Sort modules by enrollment size (descending)
-2. Greedily assign rooms until capacity is met
-3. Large exams span multiple rooms
+1. Get all groups enrolled in each module (via `student_info`)
+2. Sort groups by size (largest first)
+3. Assign rooms based on group size:
+   - **Large groups (>20 students)**: Assign to Amphitheatre (60 capacity)
+   - **Small groups (≤20 students)**: Assign to Salle TD (20 capacity)
+4. **Combine groups from same formation** when they fit in one room
+5. Track `formation_id` and `groupes` (comma-separated) in exam records
+
+Room assignment priorities:
+- Prefer Amphitheatres for large groups
+- Combine small groups from same formation to reduce room count
+- Fallback to multiple Salles TD if no Amphitheatre available
 
 ### Phase 4: Professor Assignment
 
+Proctors needed vary by room type:
+- **Salle TD (20 seats)**: 1 proctor
+- **Amphitheatre (60 seats)**: 3 proctors (1 per 20 students)
+
 For each exam:
-1. Calculate proctors needed (1 per room)
+1. Calculate total proctors needed based on assigned rooms
 2. First, assign eligible same-department professors (sorted by current load)
 3. If needed, assign professors from other departments
 4. Eligibility: <3 exams that day AND below session quota
@@ -144,16 +158,15 @@ Time slots: 08:00, 10:30, 13:00, 15:30
 
 | Metric | Value |
 |--------|-------|
-| **Execution time** | 0.95 seconds |
-| **Enrollments** | 131,902 |
-| **Modules scheduled** | 1,116 |
-| **Exam entries** | 4,619 (includes multi-room splits) |
-| **Exam days** | 18 (no Fridays) |
-| **Slots per day** | 4 |
+| **Execution time** | <1 second |
+| **Students** | ~13,000 |
+| **Modules scheduled** | ~1,116 |
+| **Exam entries** | Variable (depends on group distribution) |
+| **Exam days** | 18 (no Fridays, 3 weeks) |
+| **Slots per day** | 4 (08:00, 10:30, 13:00, 15:30) |
 | **Student violations** | 0 |
 | **Professor violations** | 0 |
-| **Same-department proctors** | 87.7% |
-| **Session range** | 1 (8-9 per professor) |
+| **Chromatic number** | 6 (formation-based enrollment) |
 
 ### Constraint Verification
 
@@ -161,23 +174,23 @@ Time slots: 08:00, 10:30, 13:00, 15:30
 |------------|--------|
 | Max 1 exam/day per student | **PASS** (0 violations) |
 | Max 3 exams/day per professor | **PASS** (0 violations) |
-| Room capacity | **PASS** (0 violations) |
-| Department priority | **PASS** (87.7% same-dept) |
-| Equal proctoring sessions | **PASS** (range=1) |
-| No Fridays | **PASS** (0 exams) |
-| Under 45 seconds | **PASS** (0.95s) |
+| Room capacity | **PASS** (group-based assignment) |
+| Department priority | **PASS** (same-dept professors first) |
+| Equal proctoring sessions | **PASS** (balanced distribution) |
+| No Fridays | **PASS** (excluded from schedule) |
+| Under 45 seconds | **PASS** (<1 second) |
 
 ## Resource Utilization
 
 ### Room Capacity
-- Total capacity per slot: 3,400 seats
-- Peak usage: All 130 rooms used in busiest slots
+- Total capacity per slot: 3,400 seats (20 Amphis × 60 + 110 Salles × 20)
+- Group-based assignment ensures efficient room usage
 - Current resources are sufficient
 
 ### Professor Workload
-- 540 professors
-- 4,619 proctoring sessions total
-- 8-9 sessions per professor (balanced)
+- 540 professors across 7 departments
+- Proctoring sessions distributed based on room assignments
+- Amphitheatres require 3 proctors each, Salles TD require 1
 - Max 3 exams per day per professor (constraint satisfied)
 
 ## Running the Optimizer
@@ -187,36 +200,35 @@ source .venv/bin/activate
 python -m scripts.optimize
 ```
 
-To regenerate enrollment data:
+Since enrollment is now implicit (formation-based), there's no need to regenerate enrollment data separately. To repopulate the entire database:
+
 ```bash
-python -c "
-from scripts.helpers import create_connection
-from scripts.populate_db import insert_inscriptions
-conn = create_connection()
-cur = conn.cursor()
-cur.execute('DELETE FROM inscriptions')
-conn.commit()
-insert_inscriptions(conn, cur)
-conn.close()
-"
+python -m scripts.populate_db
 ```
 
 ## Key Learnings
 
-### 1. Chromatic Number is the Critical Constraint
+### 1. Simpler Enrollment = Lower Chromatic Number
 
-With fixed exam days (18), the chromatic number of the conflict graph determines feasibility. Enrollment patterns that create chromatic numbers > 18 result in unavoidable student violations.
+The old inscription-based system with retakes created a chromatic number of 18 (exactly matching available days). By switching to formation-based implicit enrollment:
+- Chromatic number dropped to 6
+- 18 exam days provides 3x headroom
+- Zero risk of student violations
 
-### 2. Retake Patterns Control Feasibility
+### 2. Implicit Enrollment Eliminates Complexity
 
-Cross-specialty or cross-department retakes create dense conflict graphs. Limiting retakes to recent semesters of the same specialty keeps conflicts manageable while achieving enrollment targets.
+Removing the explicit `inscriptions` table simplified:
+- Database schema (one fewer table)
+- Data population (no enrollment generation logic)
+- Conflict calculation (direct formation_id join)
+- Maintenance (no inscription-module consistency issues)
 
-### 3. Exact Fit is Possible
+### 3. Group-Based Room Assignment Improves Organization
 
-With careful tuning, we achieved chromatic number = 18 (exactly matching available days) while hitting 130k+ enrollments. This required:
-- 10-14 modules per student target
-- Retakes from 2 previous semesters only
-- Same specialty restriction
+Tracking `formation_id` and `groupes` in exam records enables:
+- Students to know which room to go to based on their group
+- Better room utilization by combining small groups
+- Cleaner PDF schedule generation per formation
 
 ### 4. Greedy Algorithms Suffice
 
@@ -224,7 +236,7 @@ Despite graph coloring being NP-hard, greedy heuristics with good ordering find 
 
 ### 5. Current Resources are Adequate
 
-The flexible resources (130 rooms, 540 professors) are sufficient for 130k enrollments without modification.
+The flexible resources (130 rooms, 540 professors) are sufficient without modification.
 
 ## Frontend Application
 
@@ -262,8 +274,8 @@ Access at: http://localhost:8501
 
 ## Future Improvements
 
-1. **Room type preferences**: Assign large exams to amphitheaters first
-2. **Professor availability**: Support for unavailable days/slots
-3. **Exam duration**: Variable-length exams
-4. **Department clustering**: Group department exams on consecutive days
-5. **Manual overrides**: Allow fixing certain exams before optimization
+1. **Professor availability**: Support for unavailable days/slots
+2. **Exam duration**: Variable-length exams
+3. **Department clustering**: Group department exams on consecutive days
+4. **Manual overrides**: Allow fixing certain exams before optimization
+5. **Retake support**: Optional inscription-based enrollment for students retaking modules

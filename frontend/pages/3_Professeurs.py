@@ -17,24 +17,71 @@ def sanitize_text(text):
     if text is None:
         return ""
     replacements = {
-        'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e', 'É': 'E', 'È': 'E', 'Ê': 'E', 'Ë': 'E',
-        'à': 'a', 'â': 'a', 'ä': 'a', 'á': 'a', 'À': 'A', 'Â': 'A', 'Ä': 'A', 'Á': 'A',
-        'ù': 'u', 'û': 'u', 'ü': 'u', 'ú': 'u', 'Ù': 'U', 'Û': 'U', 'Ü': 'U', 'Ú': 'U',
-        'î': 'i', 'ï': 'i', 'í': 'i', 'ì': 'i', 'Î': 'I', 'Ï': 'I', 'Í': 'I', 'Ì': 'I',
-        'ô': 'o', 'ö': 'o', 'ó': 'o', 'ò': 'o', 'Ô': 'O', 'Ö': 'O', 'Ó': 'O', 'Ò': 'O',
-        'ç': 'c', 'Ç': 'C',
-        'ñ': 'n', 'Ñ': 'N',
-        'œ': 'oe', 'Œ': 'OE', 'æ': 'ae', 'Æ': 'AE',
-        '\u2019': "'", '\u2018': "'", '\u201c': '"', '\u201d': '"',  # Smart quotes
-        ''': "'", ''': "'", '"': '"', '"': '"',
-        '–': '-', '—': '-',  # Dashes
-        '…': '...', '•': '*',
+        "é": "e",
+        "è": "e",
+        "ê": "e",
+        "ë": "e",
+        "É": "E",
+        "È": "E",
+        "Ê": "E",
+        "Ë": "E",
+        "à": "a",
+        "â": "a",
+        "ä": "a",
+        "á": "a",
+        "À": "A",
+        "Â": "A",
+        "Ä": "A",
+        "Á": "A",
+        "ù": "u",
+        "û": "u",
+        "ü": "u",
+        "ú": "u",
+        "Ù": "U",
+        "Û": "U",
+        "Ü": "U",
+        "Ú": "U",
+        "î": "i",
+        "ï": "i",
+        "í": "i",
+        "ì": "i",
+        "Î": "I",
+        "Ï": "I",
+        "Í": "I",
+        "Ì": "I",
+        "ô": "o",
+        "ö": "o",
+        "ó": "o",
+        "ò": "o",
+        "Ô": "O",
+        "Ö": "O",
+        "Ó": "O",
+        "Ò": "O",
+        "ç": "c",
+        "Ç": "C",
+        "ñ": "n",
+        "Ñ": "N",
+        "œ": "oe",
+        "Œ": "OE",
+        "æ": "ae",
+        "Æ": "AE",
+        "\u2019": "'",
+        "\u2018": "'",
+        "\u201c": '"',
+        "\u201d": '"',  # Smart quotes
+        """: "'", """: "'",
+        '"': '"',
+        '"': '"',
+        "–": "-",
+        "—": "-",  # Dashes
+        "…": "...",
+        "•": "*",
     }
     result = str(text)
     for old, new in replacements.items():
         result = result.replace(old, new)
     # Remove any remaining non-ASCII characters
-    result = result.encode('ascii', 'ignore').decode('ascii')
+    result = result.encode("ascii", "ignore").decode("ascii")
     return result
 
 
@@ -118,19 +165,24 @@ try:
         """)
     else:
         dept_id = next(d[0] for d in departments if d[1] == selected_dept)
-        cur.execute("""
+        cur.execute(
+            """
             SELECT p.id, p.nom, d.nom as dept,
                    (SELECT COUNT(*) FROM surveillances s WHERE s.prof_id = p.id) as sessions
             FROM professeurs p
             JOIN departements d ON p.dept_id = d.id
             WHERE p.dept_id = %s
             ORDER BY p.nom
-        """, (dept_id,))
+        """,
+            (dept_id,),
+        )
 
     professors = cur.fetchall()
 
     with col2:
-        prof_options = ["-- Selectionnez --"] + [f"{p[1]} ({p[3]} sessions)" for p in professors]
+        prof_options = ["-- Selectionnez --"] + [
+            f"{p[1]} ({p[3]} sessions)" for p in professors
+        ]
         selected_prof = st.selectbox("Professeur", prof_options)
 
     st.markdown("---")
@@ -142,7 +194,8 @@ try:
         prof_id, prof_name, dept_name, sessions = prof_data
 
         # Get professor's schedule
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
                 DATE_FORMAT(ex.date_heure, '%d/%m/%Y') as date,
                 DATE_FORMAT(ex.date_heure, '%H:%i') as heure,
@@ -157,7 +210,9 @@ try:
             JOIN specialites sp ON f.specialite_id = sp.id
             WHERE s.prof_id = %s
             ORDER BY ex.date_heure
-        """, (prof_id,))
+        """,
+            (prof_id,),
+        )
 
         results = cur.fetchall()
 
@@ -170,24 +225,30 @@ try:
             st.metric("Sessions de surveillance", sessions)
 
         if results:
-            df = pd.DataFrame(results, columns=["Date", "Heure", "Module", "Salle", "Formation"])
+            df = pd.DataFrame(
+                results, columns=["Date", "Heure", "Module", "Salle", "Formation"]
+            )
 
             st.subheader("Planning de Surveillance")
             st.dataframe(df, use_container_width=True, height=400)
 
             # Check if professor is respecting max 3/day constraint
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT DATE(ex.date_heure) as jour, COUNT(*) as cnt
                 FROM surveillances s
                 JOIN examens ex ON s.examen_id = ex.id
                 WHERE s.prof_id = %s
                 GROUP BY DATE(ex.date_heure)
                 HAVING COUNT(*) > 3
-            """, (prof_id,))
+            """,
+                (prof_id,),
+            )
             violations = cur.fetchall()
 
             if violations:
-                st.error(f"Attention: Ce professeur depasse 3 surveillances sur {len(violations)} jour(s)")
+                st.error(f"Attention: Ce professeur depasse 3 surveillances sur {
+                         len(violations)} jour(s)")
             else:
                 st.success("Contrainte respectee: Maximum 3 surveillances par jour")
 
@@ -199,21 +260,24 @@ try:
                     label="Telecharger PDF",
                     data=pdf_bytes,
                     file_name=f"Planning_{prof_name.replace(' ', '_')}.pdf",
-                    mime="application/pdf"
+                    mime="application/pdf",
                 )
 
             # Daily breakdown
             st.markdown("---")
             st.subheader("Repartition par Jour")
 
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT DATE_FORMAT(ex.date_heure, '%d/%m/%Y') as jour, COUNT(*) as sessions
                 FROM surveillances s
                 JOIN examens ex ON s.examen_id = ex.id
                 WHERE s.prof_id = %s
                 GROUP BY DATE(ex.date_heure)
                 ORDER BY DATE(ex.date_heure)
-            """, (prof_id,))
+            """,
+                (prof_id,),
+            )
             daily = cur.fetchall()
             df_daily = pd.DataFrame(daily, columns=["Jour", "Sessions"])
             st.bar_chart(df_daily.set_index("Jour"))
@@ -240,9 +304,10 @@ try:
             ORDER BY d.nom
         """)
         results = cur.fetchall()
-        df = pd.DataFrame(results,
-                          columns=["Departement", "Professeurs", "Total Sessions", "Moyenne"])
-        df["Moyenne"] = pd.to_numeric(df["Moyenne"], errors='coerce').round(1)
+        df = pd.DataFrame(
+            results, columns=["Departement", "Professeurs", "Total Sessions", "Moyenne"]
+        )
+        df["Moyenne"] = pd.to_numeric(df["Moyenne"], errors="coerce").round(1)
         st.dataframe(df, use_container_width=True)
 
         # Distribution chart
@@ -267,4 +332,5 @@ try:
 except Exception as e:
     st.error(f"Erreur: {e}")
     import traceback
+
     st.code(traceback.format_exc())
