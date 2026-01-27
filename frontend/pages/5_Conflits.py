@@ -22,10 +22,11 @@ try:
     # Student conflicts (>1 exam per day)
     cur.execute("""
         SELECT COUNT(*) FROM (
-            SELECT i.etudiant_id, DATE(ex.date_heure), COUNT(DISTINCT ex.module_id) as cnt
-            FROM inscriptions i
-            JOIN examens ex ON i.module_id = ex.module_id
-            GROUP BY i.etudiant_id, DATE(ex.date_heure)
+            SELECT e.id, DATE(ex.date_heure), COUNT(DISTINCT ex.module_id) as cnt
+            FROM etudiants e
+            JOIN modules m ON e.formation_id = m.formation_id
+            JOIN examens ex ON m.id = ex.module_id
+            GROUP BY e.id, DATE(ex.date_heure)
             HAVING cnt > 1
         ) t
     """)
@@ -59,7 +60,7 @@ try:
     cur.execute("""
         SELECT COUNT(*) FROM (
             SELECT m.id,
-                   (SELECT COUNT(*) FROM inscriptions i WHERE i.module_id = m.id) as enrollment,
+                   (SELECT COUNT(*) FROM etudiants e WHERE e.formation_id = m.formation_id) as enrollment,
                    SUM(l.capacite) as capacity
             FROM modules m
             JOIN examens ex ON ex.module_id = m.id
@@ -94,9 +95,8 @@ try:
             JOIN formations f ON e.formation_id = f.id
             JOIN specialites s ON f.specialite_id = s.id
             JOIN departements d ON s.dept_id = d.id
-            JOIN inscriptions i ON i.etudiant_id = e.id
-            JOIN examens ex ON i.module_id = ex.module_id
-            JOIN modules m ON ex.module_id = m.id
+            JOIN modules m ON m.formation_id = e.formation_id
+            JOIN examens ex ON m.id = ex.module_id
             GROUP BY e.id, e.prenom, e.nom, d.nom, DATE(ex.date_heure)
             HAVING COUNT(DISTINCT ex.module_id) > 1
             ORDER BY nb_examens DESC, date
@@ -126,10 +126,11 @@ try:
         JOIN formations f ON f.specialite_id = s.id
         JOIN etudiants e ON e.formation_id = f.id
         LEFT JOIN (
-            SELECT i.etudiant_id, DATE(ex.date_heure) as jour, COUNT(DISTINCT ex.module_id) as cnt
-            FROM inscriptions i
-            JOIN examens ex ON i.module_id = ex.module_id
-            GROUP BY i.etudiant_id, DATE(ex.date_heure)
+            SELECT et.id as etudiant_id, DATE(ex.date_heure) as jour, COUNT(DISTINCT ex.module_id) as cnt
+            FROM etudiants et
+            JOIN modules m ON et.formation_id = m.formation_id
+            JOIN examens ex ON m.id = ex.module_id
+            GROUP BY et.id, DATE(ex.date_heure)
         ) conflict ON conflict.etudiant_id = e.id
         GROUP BY d.id, d.nom
         ORDER BY taux_conflit DESC
@@ -160,10 +161,11 @@ try:
         JOIN formations f ON f.specialite_id = sp.id
         JOIN etudiants e ON e.formation_id = f.id
         LEFT JOIN (
-            SELECT i.etudiant_id, DATE(ex.date_heure) as jour, COUNT(DISTINCT ex.module_id) as cnt
-            FROM inscriptions i
-            JOIN examens ex ON i.module_id = ex.module_id
-            GROUP BY i.etudiant_id, DATE(ex.date_heure)
+            SELECT et.id as etudiant_id, DATE(ex.date_heure) as jour, COUNT(DISTINCT ex.module_id) as cnt
+            FROM etudiants et
+            JOIN modules m ON et.formation_id = m.formation_id
+            JOIN examens ex ON m.id = ex.module_id
+            GROUP BY et.id, DATE(ex.date_heure)
         ) conflict ON conflict.etudiant_id = e.id
         GROUP BY d.id, d.nom, f.id, sp.nom, f.cycle, f.semestre
         HAVING en_conflit > 0

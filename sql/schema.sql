@@ -1,4 +1,6 @@
 
+SELECT 1;
+
 CREATE TABLE departements (
     nom VARCHAR(255) NOT NULL,
 
@@ -71,19 +73,11 @@ CREATE TABLE examens (
     module_id INT,
     lieu_examen_id INT,
     date_heure DATETIME NOT NULL,
-    formation_id INT,  -- Which formation's students go to this room
+    formation_id INT,     -- Which formation's students go to this room
     groupes VARCHAR(50),  -- Comma-separated group numbers (e.g., "1,2" or "3")
     FOREIGN KEY (module_id) REFERENCES modules(id),
     FOREIGN KEY (lieu_examen_id) REFERENCES lieu_examens(id),
     FOREIGN KEY (formation_id) REFERENCES formations(id)
-);
-
-CREATE TABLE inscriptions (
-    etudiant_id INT,
-    module_id INT,
-    PRIMARY KEY (etudiant_id, module_id),
-    FOREIGN KEY (etudiant_id) REFERENCES etudiants(id),
-    FOREIGN KEY (module_id) REFERENCES modules(id)
 );
 
 CREATE TABLE surveillances (

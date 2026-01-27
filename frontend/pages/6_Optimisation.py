@@ -133,10 +133,11 @@ try:
             # Check student constraint
             cur.execute("""
                 SELECT COUNT(*) FROM (
-                    SELECT i.etudiant_id, DATE(ex.date_heure), COUNT(DISTINCT ex.module_id) as cnt
-                    FROM inscriptions i
-                    JOIN examens ex ON i.module_id = ex.module_id
-                    GROUP BY i.etudiant_id, DATE(ex.date_heure)
+                    SELECT e.id, DATE(ex.date_heure), COUNT(DISTINCT ex.module_id) as cnt
+                    FROM etudiants e
+                    JOIN modules m ON e.formation_id = m.formation_id
+                    JOIN examens ex ON m.id = ex.module_id
+                    GROUP BY e.id, DATE(ex.date_heure)
                     HAVING cnt > 1
                 ) t
             """)
@@ -168,7 +169,7 @@ try:
             cur.execute("""
                 SELECT COUNT(*) FROM (
                     SELECT m.id,
-                           (SELECT COUNT(*) FROM inscriptions i WHERE i.module_id = m.id) as enroll,
+                           (SELECT COUNT(*) FROM etudiants e WHERE e.formation_id = m.formation_id) as enroll,
                            SUM(l.capacite) as cap
                     FROM modules m
                     JOIN examens ex ON ex.module_id = m.id

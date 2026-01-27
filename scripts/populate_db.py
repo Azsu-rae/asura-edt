@@ -233,89 +233,6 @@ def insert_students(conn, cur):
     conn.commit()
 
 
-def insert_inscriptions(conn, cur):
-    try:
-        # Get all students with their formation, specialty, semester, and department
-        cur.execute("""
-            SELECT e.id, e.formation_id, f.specialite_id, f.semestre, s.dept_id
-            FROM etudiants e
-            JOIN formations f ON e.formation_id = f.id
-            JOIN specialites s ON f.specialite_id = s.id
-        """)
-        students = cur.fetchall()
-
-        # Get all modules mapped by formation
-        cur.execute("SELECT id, formation_id FROM modules")
-        all_modules = cur.fetchall()
-
-        # Get formations by specialty with their semesters
-        cur.execute("""
-            SELECT f.id, f.specialite_id, f.semestre, s.dept_id
-            FROM formations f
-            JOIN specialites s ON f.specialite_id = s.id
-        """)
-        formations_data = cur.fetchall()
-    except mysql.connector.Error as e:
-        print(f"Error retrieving data for inscriptions: {e}")
-        return
-
-    # Organize modules by formation_id
-    modules_by_formation = {}
-    for mod_id, form_id in all_modules:
-        if form_id not in modules_by_formation:
-            modules_by_formation[form_id] = []
-        modules_by_formation[form_id].append(mod_id)
-
-    # Organize formations by specialty and by department
-    formations_by_specialty = {}
-    formations_by_dept = {}
-    for form_id, spec_id, semester, dept_id in formations_data:
-        if spec_id not in formations_by_specialty:
-            formations_by_specialty[spec_id] = []
-        formations_by_specialty[spec_id].append((form_id, semester))
-
-        if dept_id not in formations_by_dept:
-            formations_by_dept[dept_id] = []
-        formations_by_dept[dept_id].append((form_id, semester))
-
-    for student_id, formation_id, specialite_id, current_semester, dept_id in students:
-        # Enroll in all modules of their formation (6 modules)
-        formation_modules = modules_by_formation.get(formation_id, [])
-        modules_to_enroll = set(formation_modules)
-
-        # Target: 10-14 modules per student for ~130k total enrollments
-        total_modules_target = random.randint(10, 14)
-
-        # Strategy: Add retakes from up to 2 previous semesters of same specialty
-        # This keeps chromatic number manageable while achieving enrollment target
-        if current_semester > 1:
-            previous_formations = [
-                f_id for f_id, sem in formations_by_specialty.get(specialite_id, [])
-                if current_semester - 2 <= sem < current_semester
-            ]
-            previous_modules = []
-            for f_id in previous_formations:
-                previous_modules.extend(modules_by_formation.get(f_id, []))
-
-            attempts = 0
-            while len(modules_to_enroll) < total_modules_target and previous_modules and attempts < 50:
-                extra_mod = random.choice(previous_modules)
-                modules_to_enroll.add(extra_mod)
-                attempts += 1
-
-        for mod_id in modules_to_enroll:
-            try:
-                cur.execute(
-                    "INSERT INTO inscriptions (etudiant_id, module_id) VALUES (%s, %s)",
-                    (student_id, mod_id),
-                )
-            except mysql.connector.Error:
-                # Ignore duplicate entries
-                pass
-
-    conn.commit()
-
-
 def insert_professors(conn, cur):
     try:
         cur.execute("SELECT id, nom FROM departements")
@@ -385,6 +302,5 @@ if __name__ == "__main__":
     insert_modules(conn, cur)
     insert_professors(conn, cur)
     insert_exam_locations(conn, cur)
-    insert_inscriptions(conn, cur)
 
     conn.close()

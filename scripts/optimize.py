@@ -56,15 +56,20 @@ def optimize_schedule():
     }
     module_ids = list(modules.keys())
 
-    # Load student enrollments per module
-    cur.execute("""
-        SELECT module_id, etudiant_id FROM inscriptions
-    """)
+    # Build student-module relationships from formations
+    # Students take all modules of their formation
+    cur.execute("SELECT id, formation_id FROM modules")
+    modules_by_formation = defaultdict(list)
+    for mod_id, form_id in cur.fetchall():
+        modules_by_formation[form_id].append(mod_id)
+
+    cur.execute("SELECT id, formation_id FROM etudiants")
     module_students = defaultdict(set)
     student_modules = defaultdict(set)
-    for module_id, student_id in cur.fetchall():
-        module_students[module_id].add(student_id)
-        student_modules[student_id].add(module_id)
+    for student_id, formation_id in cur.fetchall():
+        for module_id in modules_by_formation[formation_id]:
+            module_students[module_id].add(student_id)
+            student_modules[student_id].add(module_id)
 
     # Load student groups (student_id -> (formation_id, groupe))
     cur.execute("SELECT id, formation_id, groupe FROM etudiants")
@@ -441,13 +446,14 @@ def optimize_schedule():
     print("\nVerifying constraints...")
 
     # Check student constraint (max 1 exam per day)
-    # Note: same module may have multiple room entries, so count distinct modules
+    # Students take all modules of their formation, so check via formation_id
     cur.execute("""
-        SELECT i.etudiant_id, DATE(ex.date_heure) as exam_date,
+        SELECT e.id as etudiant_id, DATE(ex.date_heure) as exam_date,
                COUNT(DISTINCT ex.module_id) as exam_count
-        FROM inscriptions i
-        JOIN examens ex ON i.module_id = ex.module_id
-        GROUP BY i.etudiant_id, DATE(ex.date_heure)
+        FROM etudiants e
+        JOIN modules m ON e.formation_id = m.formation_id
+        JOIN examens ex ON m.id = ex.module_id
+        GROUP BY e.id, DATE(ex.date_heure)
         HAVING COUNT(DISTINCT ex.module_id) > 1
         LIMIT 5
     """)

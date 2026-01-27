@@ -23,9 +23,9 @@ try:
     with col1:
         st.metric("Etudiants", f"{cur.fetchone()[0]:,}")
 
-    cur.execute("SELECT COUNT(*) FROM inscriptions")
+    cur.execute("SELECT COUNT(*) FROM formations")
     with col2:
-        st.metric("Inscriptions", f"{cur.fetchone()[0]:,}")
+        st.metric("Formations", f"{cur.fetchone()[0]:,}")
 
     cur.execute("SELECT COUNT(DISTINCT module_id) FROM examens")
     with col3:
@@ -163,7 +163,7 @@ try:
     # Test queries
     queries = [
         ("Count etudiants", "SELECT COUNT(*) FROM etudiants"),
-        ("Count inscriptions", "SELECT COUNT(*) FROM inscriptions"),
+        ("Count formations", "SELECT COUNT(*) FROM formations"),
         ("Examens avec jointures", """
             SELECT e.id, m.nom, l.nom, e.date_heure
             FROM examens e
@@ -173,10 +173,11 @@ try:
         """),
         ("Conflits etudiants", """
             SELECT COUNT(*) FROM (
-                SELECT i.etudiant_id, DATE(ex.date_heure), COUNT(DISTINCT ex.module_id)
-                FROM inscriptions i
-                JOIN examens ex ON i.module_id = ex.module_id
-                GROUP BY i.etudiant_id, DATE(ex.date_heure)
+                SELECT e.id, DATE(ex.date_heure), COUNT(DISTINCT ex.module_id)
+                FROM etudiants e
+                JOIN modules m ON e.formation_id = m.formation_id
+                JOIN examens ex ON m.id = ex.module_id
+                GROUP BY e.id, DATE(ex.date_heure)
                 HAVING COUNT(DISTINCT ex.module_id) > 1
             ) t
         """),

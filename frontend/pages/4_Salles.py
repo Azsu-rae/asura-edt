@@ -188,7 +188,7 @@ try:
                 DATE_FORMAT(ex.date_heure, '%d/%m/%Y') as date,
                 DATE_FORMAT(ex.date_heure, '%H:%i') as heure,
                 m.nom as module,
-                (SELECT COUNT(*) FROM inscriptions i WHERE i.module_id = m.id) as inscrits
+                (SELECT COUNT(*) FROM etudiants e WHERE e.formation_id = m.formation_id) as inscrits
             FROM examens ex
             JOIN modules m ON ex.module_id = m.id
             WHERE ex.lieu_examen_id = %s

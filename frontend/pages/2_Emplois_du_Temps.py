@@ -26,15 +26,14 @@ def sanitize_text(text):
         'ç': 'c', 'Ç': 'C',
         'ñ': 'n', 'Ñ': 'N',
         'œ': 'oe', 'Œ': 'OE', 'æ': 'ae', 'Æ': 'AE',
-        '\u2019': "'", '\u2018': "'", '\u201c': '"', '\u201d': '"',  # Smart quotes
+        '\u2019': "'", '\u2018': "'", '\u201c': '"', '\u201d': '"',
         ''': "'", ''': "'", '"': '"', '"': '"',
-        '–': '-', '—': '-',  # Dashes
+        '–': '-', '—': '-',
         '…': '...', '•': '*',
     }
     result = str(text)
     for old, new in replacements.items():
         result = result.replace(old, new)
-    # Remove any remaining non-ASCII characters
     result = result.encode('ascii', 'ignore').decode('ascii')
     return result
 
@@ -43,7 +42,7 @@ class PDFSchedule(FPDF):
     """Custom PDF class for exam schedules."""
 
     def __init__(self, title):
-        super().__init__()
+        super().__init__(orientation='L')  # Landscape for wide tables
         self.title_text = sanitize_text(title)
 
     def header(self):
@@ -57,44 +56,118 @@ class PDFSchedule(FPDF):
         self.cell(0, 10, f"Page {self.page_no()}", align="C")
 
 
-def generate_pdf(formation_name, schedule_df, groups_df=None):
-    """Generate PDF for a formation's schedule."""
+def build_schedule_pivot(cur, form_id):
+    """Build a pivot table with groups as rows and modules as columns."""
+    # Get all exam data for this formation
+    cur.execute("""
+        SELECT
+            m.nom as module,
+            ex.groupes as groupe,
+            l.nom as salle,
+            DATE_FORMAT(ex.date_heure, '%d/%m') as date,
+            DATE_FORMAT(ex.date_heure, '%H:%i') as heure
+        FROM examens ex
+        JOIN modules m ON ex.module_id = m.id
+        JOIN lieu_examens l ON ex.lieu_examen_id = l.id
+        WHERE m.formation_id = %s
+        ORDER BY m.nom, ex.groupes
+    """, (form_id,))
+    results = cur.fetchall()
+
+    if not results:
+        return None, []
+
+    # Get list of modules for this formation
+    cur.execute("""
+        SELECT DISTINCT m.nom
+        FROM modules m
+        WHERE m.formation_id = %s
+        ORDER BY m.nom
+    """, (form_id,))
+    modules = [row[0] for row in cur.fetchall()]
+
+    # Get list of groups for this formation
+    cur.execute("""
+        SELECT DISTINCT groupe
+        FROM etudiants
+        WHERE formation_id = %s
+        ORDER BY groupe
+    """, (form_id,))
+    groups = [row[0] for row in cur.fetchall()]
+
+    # Build the pivot data structure
+    # Each cell will contain: "Salle\nDate Heure"
+    pivot_data = {}
+    for group in groups:
+        pivot_data[group] = {module: "-" for module in modules}
+
+    # Fill in the data from exam results
+    for module, groupe_str, salle, date, heure in results:
+        if groupe_str:
+            # groupe_str can be "1" or "1,2" etc.
+            for g in groupe_str.split(","):
+                g = int(g.strip())
+                if g in pivot_data:
+                    pivot_data[g][module] = f"{salle}\n{date} {heure}"
+
+    # Convert to DataFrame
+    rows = []
+    for group in sorted(pivot_data.keys()):
+        row = {"Groupe": f"G{group}"}
+        for module in modules:
+            row[module] = pivot_data[group][module]
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    return df, modules
+
+
+def generate_pdf(formation_name, schedule_df, modules, groups_info=None):
+    """Generate PDF for a formation's schedule with groups as rows."""
     pdf = PDFSchedule(f"Emploi du Temps - {formation_name}")
     pdf.add_page()
-    pdf.set_font("Helvetica", size=10)
 
-    # Show group information if available
-    if groups_df is not None and not groups_df.empty:
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 8, "Groupes:", ln=True)
+    # Show group counts if available
+    if groups_info is not None and not groups_info.empty:
         pdf.set_font("Helvetica", size=9)
-        for _, row in groups_df.iterrows():
-            pdf.cell(0, 6, f"  Groupe {row['Groupe']}: {row['Effectif']} etudiants", ln=True)
-        pdf.ln(5)
+        group_text = " | ".join([f"G{row['Groupe']}: {row['Effectif']} etud." for _, row in groups_info.iterrows()])
+        pdf.cell(0, 6, sanitize_text(group_text), ln=True)
+        pdf.ln(3)
+
+    if schedule_df is None or schedule_df.empty:
+        pdf.set_font("Helvetica", size=10)
+        pdf.cell(0, 10, "Aucun examen planifie.", ln=True)
+        return pdf.output()
+
+    # Calculate column widths
+    num_modules = len(modules)
+    available_width = 277 - 20  # A4 landscape width minus margins and Groupe column
+    groupe_col_width = 20
+    module_col_width = min(45, available_width / max(num_modules, 1))
 
     # Table header
     pdf.set_fill_color(200, 200, 200)
-    pdf.set_font("Helvetica", "B", 9)
-    col_widths = [22, 60, 18, 20, 40]
-    headers = ["Date", "Module", "Heure", "Groupe", "Salle"]
+    pdf.set_font("Helvetica", "B", 8)
 
-    for i, header in enumerate(headers):
-        pdf.cell(col_widths[i], 8, header, border=1, fill=True, align="C")
+    pdf.cell(groupe_col_width, 10, "Groupe", border=1, fill=True, align="C")
+    for module in modules:
+        module_short = sanitize_text(module)
+        if len(module_short) > 20:
+            module_short = module_short[:18] + ".."
+        pdf.cell(module_col_width, 10, module_short, border=1, fill=True, align="C")
     pdf.ln()
 
     # Table content
-    pdf.set_font("Helvetica", size=8)
+    pdf.set_font("Helvetica", size=7)
     for _, row in schedule_df.iterrows():
-        pdf.cell(col_widths[0], 7, sanitize_text(row["Date"]), border=1)
-        module = sanitize_text(row["Module"])
-        module = module[:30] + "..." if len(module) > 30 else module
-        pdf.cell(col_widths[1], 7, module, border=1)
-        pdf.cell(col_widths[2], 7, sanitize_text(row["Heure"]), border=1, align="C")
-        groupe = sanitize_text(str(row["Groupe(s)"])) if row["Groupe(s)"] else "-"
-        pdf.cell(col_widths[3], 7, groupe, border=1, align="C")
-        salle = sanitize_text(row["Salle"])
-        salle = salle[:20] + "..." if len(salle) > 20 else salle
-        pdf.cell(col_widths[4], 7, salle, border=1)
+        pdf.cell(groupe_col_width, 12, str(row["Groupe"]), border=1, align="C")
+        for module in modules:
+            cell_text = sanitize_text(str(row[module]))
+            # Handle multiline cell content
+            if "\n" in cell_text:
+                parts = cell_text.split("\n")
+                cell_text = f"{parts[0][:15]}\n{parts[1]}" if len(parts) > 1 else parts[0]
+            pdf.cell(module_col_width, 12, cell_text.replace("\n", " | "), border=1, align="C")
         pdf.ln()
 
     return pdf.output()
@@ -169,65 +242,45 @@ try:
         form_id = next(f[0] for f in formations if f[1] == selected_form)
         form_name = selected_form
 
-        # Get schedule for selected formation - show room per group
+        # Build pivot table
+        schedule_df, modules = build_schedule_pivot(cur, form_id)
+
+        # Get group information
         cur.execute("""
-            SELECT
-                DATE_FORMAT(ex.date_heure, '%d/%m/%Y') as date,
-                m.nom as module,
-                DATE_FORMAT(ex.date_heure, '%H:%i') as heure,
-                ex.groupes as groupe,
-                l.nom as salle
-            FROM examens ex
-            JOIN modules m ON ex.module_id = m.id
-            JOIN lieu_examens l ON ex.lieu_examen_id = l.id
-            WHERE ex.formation_id = %s
-            ORDER BY ex.date_heure, m.nom, ex.groupes
+            SELECT groupe, COUNT(*) as effectif
+            FROM etudiants
+            WHERE formation_id = %s
+            GROUP BY groupe
+            ORDER BY groupe
         """, (form_id,))
+        groups = cur.fetchall()
+        df_groups = pd.DataFrame(groups, columns=["Groupe", "Effectif"]) if groups else None
 
-        results = cur.fetchall()
+        st.subheader(f"Emploi du Temps: {form_name}")
 
-        if results:
-            df = pd.DataFrame(results, columns=["Date", "Module", "Heure", "Groupe(s)", "Salle"])
+        if schedule_df is not None and not schedule_df.empty:
+            # Show group counts
+            if df_groups is not None and not df_groups.empty:
+                total_students = df_groups["Effectif"].sum()
+                group_info = " | ".join([f"**G{row['Groupe']}**: {row['Effectif']}" for _, row in df_groups.iterrows()])
+                st.markdown(f"{group_info} | **Total**: {total_students} etudiants")
 
-            st.subheader(f"Emploi du Temps: {form_name}")
+            st.markdown("---")
 
-            # Get group information first
-            cur.execute("""
-                SELECT groupe, COUNT(*) as effectif
-                FROM etudiants
-                WHERE formation_id = %s
-                GROUP BY groupe
-                ORDER BY groupe
-            """, (form_id,))
-            groups = cur.fetchall()
-            df_groups = pd.DataFrame(groups, columns=["Groupe", "Effectif"]) if groups else None
-
-            # Show groups alongside schedule
-            col_schedule, col_groups = st.columns([3, 1])
-
-            with col_schedule:
-                st.dataframe(df, use_container_width=True, height=400)
-
-            with col_groups:
-                st.markdown("**Groupes**")
-                if df_groups is not None and not df_groups.empty:
-                    st.dataframe(df_groups, use_container_width=True, hide_index=True)
-                    total_students = df_groups["Effectif"].sum()
-                    st.caption(f"Total: {total_students} etudiants")
-                else:
-                    st.info("Aucun groupe")
+            # Display the pivot table
+            st.dataframe(schedule_df, use_container_width=True, height=400)
 
             # PDF Export button
+            st.markdown("---")
             col1, col2 = st.columns([1, 4])
             with col1:
-                pdf_bytes = generate_pdf(form_name, df, df_groups)
+                pdf_bytes = generate_pdf(form_name, schedule_df, modules, df_groups)
                 st.download_button(
                     label="Telecharger PDF",
                     data=pdf_bytes,
                     file_name=f"EDT_{form_name.replace(' ', '_')}.pdf",
                     mime="application/pdf"
                 )
-
         else:
             st.warning("Aucun examen planifie pour cette formation.")
 
@@ -266,23 +319,8 @@ try:
                 zip_buffer = BytesIO()
                 with ZipFile(zip_buffer, 'w') as zip_file:
                     for form_id, form_name in formations:
-                        cur.execute("""
-                            SELECT
-                                DATE_FORMAT(ex.date_heure, '%d/%m/%Y') as date,
-                                m.nom as module,
-                                DATE_FORMAT(ex.date_heure, '%H:%i') as heure,
-                                ex.groupes as groupe,
-                                l.nom as salle
-                            FROM examens ex
-                            JOIN modules m ON ex.module_id = m.id
-                            JOIN lieu_examens l ON ex.lieu_examen_id = l.id
-                            WHERE ex.formation_id = %s
-                            ORDER BY ex.date_heure, m.nom, ex.groupes
-                        """, (form_id,))
-                        results = cur.fetchall()
-                        if results:
-                            df = pd.DataFrame(results,
-                                              columns=["Date", "Module", "Heure", "Groupe(s)", "Salle"])
+                        schedule_df, modules = build_schedule_pivot(cur, form_id)
+                        if schedule_df is not None and not schedule_df.empty:
                             # Get groups for this formation
                             cur.execute("""
                                 SELECT groupe, COUNT(*) as effectif
@@ -291,7 +329,7 @@ try:
                             """, (form_id,))
                             groups = cur.fetchall()
                             df_groups = pd.DataFrame(groups, columns=["Groupe", "Effectif"]) if groups else None
-                            pdf_bytes = generate_pdf(form_name, df, df_groups)
+                            pdf_bytes = generate_pdf(form_name, schedule_df, modules, df_groups)
                             zip_file.writestr(f"EDT_{form_name.replace(' ', '_')}.pdf", pdf_bytes)
 
                 zip_buffer.seek(0)
